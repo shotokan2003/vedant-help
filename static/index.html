@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Body Tracking AI Interface</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Body Tracking AI Interface</h1>
+            <div class="subtitle">CDAC DRONE TECH</div>
+        </header>
+        
+        <main>
+            <div class="video-container">
+                <div class="video-wrapper">
+                    <video id="webcam" autoplay playsinline></video>
+                    <canvas id="overlay"></canvas>
+                    <div class="status-indicator">
+                        <span id="connection-status">Disconnected</span>
+                        <span class="status-dot" id="status-dot"></span>
+                    </div>
+                </div>
+                <div class="video-controls">
+                    <button id="start-button">Start Tracking</button>
+                    <button id="stop-button" disabled>Stop Tracking</button>
+                    <button id="generate-graphs" disabled>Generate Graphs</button>
+                </div>
+                <div class="metrics-panel">
+                    <div class="metric">
+                        <span class="metric-label">Behavior:</span>
+                        <span class="metric-value" id="behavior-value">N/A</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Confidence:</span>
+                        <span class="metric-value" id="confidence-value">0%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Movement Score:</span>
+                        <span class="metric-value" id="movement-value">0.00</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Frame Count:</span>
+                        <span class="metric-value" id="frame-count">0</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="graphs-container" id="graphs-container">
+                <h2>Analysis Results</h2>
+                <div class="graph-wrapper">
+                    <h3>Action Frequency</h3>
+                    <div class="graph-image-container">
+                        <img id="action-frequency-graph" src="" alt="Action Frequency Graph">
+                    </div>
+                </div>
+                <div class="graph-wrapper">
+                    <h3>Behavior Timeline</h3>
+                    <div class="graph-image-container">
+                        <img id="behavior-timeline-graph" src="" alt="Behavior Timeline Graph">
+                    </div>
+                </div>
+                <div class="graph-wrapper">
+                    <h3>Movement Intensity</h3>
+                    <div class="graph-image-container">
+                        <img id="movement-intensity-graph" src="" alt="Movement Intensity Graph">
+                    </div>
+                </div>
+                
+                <div class="summary-panel">
+                    <h3>Analysis Summary</h3>
+                    <div id="summary-text"></div>
+                    <button id="voice-report">Play Voice Report</button>
+                </div>
+            </div>
+        </main>
+        
+        <footer>
+            <p>© 2025 Body Tracking AI Interface - CDAC DRONE TECH</p>
+        </footer>
+    </div>
+    
+    <script src="/static/script.js"></script>
+</body>
+</html>
