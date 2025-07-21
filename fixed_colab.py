@@ -229,31 +229,34 @@ async def websocket_endpoint(websocket: WebSocket):
     if MEDIAPIPE_AVAILABLE:
         holistic = mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5)
         print("✓ MediaPipe holistic model initialized")
+    
     try:
-        while True:              
-            data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)  # Add timeout
+        while True:            
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)  # Add timeout
                 
-            if not data:
-                continue
-                    
-            # Check if it's a pong response
-            if data == 'pong':
-                print(f"Received pong from {session_id}")
-                continue
-                
-            # Check if it's a JSON message (might be session init or another control message)
-            if data.startswith('{'):
-                try:
-                    json_data = json.loads(data)
-                    # We already handled the initial session_init message earlier
-                    # This is for handling other potential JSON messages
-                    print(f"Received JSON message from {session_id}: {json_data.get('type', 'unknown')}")
+                if not data:
                     continue
-                except json.JSONDecodeError:
-                    # Not valid JSON, continue with image processing
-                    pass
+                    
+                # Check if it's a pong response
+                if data == 'pong':
+                    print(f"Received pong from {session_id}")
+                    continue
+                
+                # Check if it's a JSON message
+                if data.startswith('{'):
+                    try:
+                        json_data = json.loads(data)
+                        # We already handled the initial session_init message earlier
+                        # This is for handling other potential JSON messages
+                        print(f"Received JSON message from {session_id}: {json_data.get('type', 'unknown')}")
+                        continue
+                    except json.JSONDecodeError:
+                        # Not valid JSON, continue with image processing
+                        pass
                 
                 # Process the frame
+                frame = None
                 try:
                     # Check if it's a base64 image
                     if "," in data and ";base64," in data:
@@ -270,153 +273,164 @@ async def websocket_endpoint(websocket: WebSocket):
                 except Exception as e:
                     print(f"Frame processing error: {e}")
                     continue
-    except asyncio.TimeoutError:
-        print(f"Connection to {session_id} timed out, closing...")
-        
-    except Exception as e:
-        print(f"Error receiving data: {e}")
-
-            
-    session = sessions[session_id]
-    session.frame_count += 1
-            
-            # Initialize variables
-            behavior_prediction = "unknown"
-            confidence = 0.0
-            smoothed_value = 0.0
-            
-            # Process with MediaPipe if available
-            if MEDIAPIPE_AVAILABLE and holistic:
-                # Process the frame with MediaPipe
-                image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                image.flags.writeable = False
-                results = holistic.process(image)
-                image.flags.writeable = True
-                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                overlay = image.copy()
-
-                # Draw landmarks
-                if results.face_landmarks:
-                    mp_drawing.draw_landmarks(overlay, results.face_landmarks, mp_face_mesh.FACEMESH_TESSELATION,
-                                            face_landmark_style, face_connection_style)
-                if results.right_hand_landmarks:
-                    mp_drawing.draw_landmarks(overlay, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS,
-                                            hand_style, hand_connection_style)
-                if results.left_hand_landmarks:
-                    mp_drawing.draw_landmarks(overlay, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS,
-                                            hand_style, hand_connection_style)
-                if results.pose_landmarks:
-                    mp_drawing.draw_landmarks(overlay, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS,
-                                            pose_style, pose_connection_style)
-
-                image = cv2.addWeighted(image, 1.0, overlay, 0.65, 0)
                 
-                # Movement Intensity
-                movement_score = 0.0
-                key_indices = [
-                    mp_holistic.PoseLandmark.LEFT_SHOULDER, mp_holistic.PoseLandmark.RIGHT_SHOULDER,
-                    mp_holistic.PoseLandmark.LEFT_ELBOW, mp_holistic.PoseLandmark.RIGHT_ELBOW,
-                    mp_holistic.PoseLandmark.LEFT_KNEE, mp_holistic.PoseLandmark.RIGHT_KNEE
-                ]
-                current_landmarks = [
-                    results.pose_landmarks.landmark[i]
-                    for i in key_indices
-                    if results.pose_landmarks and results.pose_landmarks.landmark[i].visibility > 0.6
-                ]
+                # Get session and increment frame count
+                session = sessions[session_id]
+                session.frame_count += 1
+                
+                # Initialize variables
+                behavior_prediction = "unknown"
+                confidence = 0.0
+                smoothed_value = 0.0
+                
+                # Process with MediaPipe if available
+                if MEDIAPIPE_AVAILABLE and holistic and frame is not None:
+                    # Process the frame with MediaPipe
+                    image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    image.flags.writeable = False
+                    results = holistic.process(image)
+                    image.flags.writeable = True
+                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                    overlay = image.copy()
 
-                if session.previous_landmarks and len(current_landmarks) == len(session.previous_landmarks):
-                    distances = [
-                        np.linalg.norm(np.array([c.x, c.y]) - np.array([p.x, p.y]))
-                        for c, p in zip(current_landmarks, session.previous_landmarks)
+                    # Draw landmarks
+                    if results.face_landmarks:
+                        mp_drawing.draw_landmarks(overlay, results.face_landmarks, mp_face_mesh.FACEMESH_TESSELATION,
+                                                face_landmark_style, face_connection_style)
+                    if results.right_hand_landmarks:
+                        mp_drawing.draw_landmarks(overlay, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS,
+                                                hand_style, hand_connection_style)
+                    if results.left_hand_landmarks:
+                        mp_drawing.draw_landmarks(overlay, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS,
+                                                hand_style, hand_connection_style)
+                    if results.pose_landmarks:
+                        mp_drawing.draw_landmarks(overlay, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS,
+                                                pose_style, pose_connection_style)
+
+                    image = cv2.addWeighted(image, 1.0, overlay, 0.65, 0)
+                    
+                    # Movement Intensity
+                    movement_score = 0.0
+                    key_indices = [
+                        mp_holistic.PoseLandmark.LEFT_SHOULDER, mp_holistic.PoseLandmark.RIGHT_SHOULDER,
+                        mp_holistic.PoseLandmark.LEFT_ELBOW, mp_holistic.PoseLandmark.RIGHT_ELBOW,
+                        mp_holistic.PoseLandmark.LEFT_KNEE, mp_holistic.PoseLandmark.RIGHT_KNEE
                     ]
-                    distances = [d for d in distances if d > 0.01]
-                    movement_score = round(sum(distances) * 1000, 2)
+                    current_landmarks = [
+                        results.pose_landmarks.landmark[i]
+                        for i in key_indices
+                        if results.pose_landmarks and results.pose_landmarks.landmark[i].visibility > 0.6
+                    ]
 
-                session.previous_landmarks = current_landmarks
-                session.movement_scores_raw.append(movement_score)
-                window = session.movement_scores_raw[-session.smoothing_window:]
-                smoothed_value = round(np.mean(window), 2) if window else 0.0
-                session.smoothed_scores.append(smoothed_value)
-                
-                # Behavior Prediction if model is available
-                if MODEL_AVAILABLE and model and results.pose_landmarks:
-                    try:
-                        pose = results.pose_landmarks.landmark
-                        pose_row = list(np.array([[lm.x, lm.y, lm.z, lm.visibility] for lm in pose]).flatten())
-                        face = results.face_landmarks.landmark if results.face_landmarks else []
-                        face_row = list(np.array([[lm.x, lm.y, lm.z, lm.visibility] for lm in face]).flatten())
-                        row = pose_row + face_row
-                        row = row[:len(feature_names)]
-                        while len(row) < len(feature_names):
-                            row.append(0.0)
+                    if session.previous_landmarks and len(current_landmarks) == len(session.previous_landmarks):
+                        distances = [
+                            np.linalg.norm(np.array([c.x, c.y]) - np.array([p.x, p.y]))
+                            for c, p in zip(current_landmarks, session.previous_landmarks)
+                        ]
+                        distances = [d for d in distances if d > 0.01]
+                        movement_score = round(sum(distances) * 1000, 2)
 
-                        X = pd.DataFrame([row], columns=feature_names)
-                        pred_class = model.predict(X)[0]
-                        behavior_prediction = label_map.get(pred_class, str(pred_class))
-                        
-                        # Add prediction probabilities if the model supports it
+                    session.previous_landmarks = current_landmarks
+                    session.movement_scores_raw.append(movement_score)
+                    window = session.movement_scores_raw[-session.smoothing_window:]
+                    smoothed_value = round(np.mean(window), 2) if window else 0.0
+                    session.smoothed_scores.append(smoothed_value)
+                    
+                    # Behavior Prediction if model is available
+                    if MODEL_AVAILABLE and model and results.pose_landmarks:
                         try:
-                            proba = model.predict_proba(X)[0]
-                            confidence = float(proba[pred_class])
-                        except:
-                            confidence = 1.0  # Default confidence
-                        
-                        session.prediction_history.append(behavior_prediction)
-                        
-                        # Add behavior prediction text to the frame
-                        label_bg = (245, 117, 16)
-                        cv2.rectangle(image, (10, 10), (10 + len(behavior_prediction)*20, 50), label_bg, -1)
-                        cv2.putText(image, behavior_prediction, (15, 40), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                                    (255, 255, 255), 2, cv2.LINE_AA)
-                    except Exception as e:
-                        print(f"Prediction error: {e}")
-                        session.prediction_history.append("error")
-            else:
-                # If MediaPipe is not available, just use the original frame with minimal processing
-                image = frame.copy()
-                cv2.putText(image, "MediaPipe not available", (15, 40), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                            (0, 0, 255), 2, cv2.LINE_AA)
-                # Add random movement values for demo purposes
-                movement_score = np.random.random() * 10
-                session.movement_scores_raw.append(movement_score)
-                window = session.movement_scores_raw[-session.smoothing_window:]
-                smoothed_value = round(np.mean(window), 2) if window else 0.0
-                session.smoothed_scores.append(smoothed_value)
-                session.prediction_history.append("demo_mode")
-                behavior_prediction = "demo_mode"
-            
-            # Add border around the frame
-            cv2.rectangle(image, (5, 5), (635, 475), (0, 190, 255), thickness=2)
-              # Reduce image quality to improve performance
-            encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 70]  # 70% quality
-            _, buffer = cv2.imencode('.jpg', image, encode_params)
-            img_str = base64.b64encode(buffer).decode('utf-8')
-            
-            # Prepare analysis data to send to client
-            analysis_data = {
-                "processedFrame": f"data:image/jpeg;base64,{img_str}",
-                "behavior": behavior_prediction,
-                "confidence": confidence,
-                "movementScore": smoothed_value,
-                "frameCount": session.frame_count,
-                "mediapipeAvailable": MEDIAPIPE_AVAILABLE,
-                "modelAvailable": MODEL_AVAILABLE
-            }
-            
-            # Send response with timeout protection
-            try:
-                await asyncio.wait_for(websocket.send_json(analysis_data), timeout=5.0)
+                            pose = results.pose_landmarks.landmark
+                            pose_row = list(np.array([[lm.x, lm.y, lm.z, lm.visibility] for lm in pose]).flatten())
+                            face = results.face_landmarks.landmark if results.face_landmarks else []
+                            face_row = list(np.array([[lm.x, lm.y, lm.z, lm.visibility] for lm in face]).flatten())
+                            row = pose_row + face_row
+                            row = row[:len(feature_names)]
+                            while len(row) < len(feature_names):
+                                row.append(0.0)
+
+                            X = pd.DataFrame([row], columns=feature_names)
+                            pred_class = model.predict(X)[0]
+                            behavior_prediction = label_map.get(pred_class, str(pred_class))
+                            
+                            # Add prediction probabilities if the model supports it
+                            try:
+                                proba = model.predict_proba(X)[0]
+                                confidence = float(proba[pred_class])
+                            except:
+                                confidence = 1.0  # Default confidence
+                            
+                            session.prediction_history.append(behavior_prediction)
+                            
+                            # Add behavior prediction text to the frame
+                            label_bg = (245, 117, 16)
+                            cv2.rectangle(image, (10, 10), (10 + len(behavior_prediction)*20, 50), label_bg, -1)
+                            cv2.putText(image, behavior_prediction, (15, 40), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                                        (255, 255, 255), 2, cv2.LINE_AA)
+                        except Exception as e:
+                            print(f"Prediction error: {e}")
+                            session.prediction_history.append("error")
+                else:
+                    # If MediaPipe is not available or frame is None, just use the original frame with minimal processing
+                    if frame is not None:
+                        image = frame.copy()
+                        cv2.putText(image, "MediaPipe not available", (15, 40), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                                    (0, 0, 255), 2, cv2.LINE_AA)
+                    else:
+                        # Create a blank image if frame is None
+                        image = np.zeros((480, 640, 3), dtype=np.uint8)
+                        cv2.putText(image, "No frame available", (15, 40), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                                    (0, 0, 255), 2, cv2.LINE_AA)
+                    
+                    # Add random movement values for demo purposes
+                    movement_score = np.random.random() * 10
+                    session.movement_scores_raw.append(movement_score)
+                    window = session.movement_scores_raw[-session.smoothing_window:]
+                    smoothed_value = round(np.mean(window), 2) if window else 0.0
+                    session.smoothed_scores.append(smoothed_value)
+                    session.prediction_history.append("demo_mode")
+                    behavior_prediction = "demo_mode"
+                
+                # Add border around the frame
+                cv2.rectangle(image, (5, 5), (635, 475), (0, 190, 255), thickness=2)
+                
+                # Reduce image quality to improve performance
+                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 70]  # 70% quality
+                _, buffer = cv2.imencode('.jpg', image, encode_params)
+                img_str = base64.b64encode(buffer).decode('utf-8')
+                
+                # Prepare analysis data to send to client
+                analysis_data = {
+                    "processedFrame": f"data:image/jpeg;base64,{img_str}",
+                    "behavior": behavior_prediction,
+                    "confidence": confidence,
+                    "movementScore": smoothed_value,
+                    "frameCount": session.frame_count,
+                    "mediapipeAvailable": MEDIAPIPE_AVAILABLE,
+                    "modelAvailable": MODEL_AVAILABLE
+                }
+                
+                # Send response with timeout protection
+                try:
+                    await asyncio.wait_for(websocket.send_json(analysis_data), timeout=5.0)
+                except asyncio.TimeoutError:
+                    print(f"Sending response to {session_id} timed out")
+                except Exception as e:
+                    print(f"Error sending response: {e}")
+                    break
+                    
             except asyncio.TimeoutError:
-                print(f"Sending response to {session_id} timed out")
-            except Exception as e:
-                print(f"Error sending response: {e}")
+                print(f"Connection to {session_id} timed out, closing...")
                 break
+            except Exception as e:
+                print(f"Error receiving data: {e}")
+                break
+                
     except WebSocketDisconnect:
         print(f"Client disconnected: {session_id}")
     except asyncio.CancelledError:
         print(f"WebSocket connection cancelled for {session_id}")
     except Exception as e:
-        print(f"Error in WebSocket connection: {e}")    
+        print(f"Error in WebSocket connection: {e}")
     finally:
         # Clean up resources
         if session_id in sessions:
@@ -580,4 +594,4 @@ if __name__ == "__main__":
     print("Starting FastAPI server...")
     print("Server will be available at: http://localhost:8000")
     print("Press Ctrl+C to stop the server")
-    uvicorn.run("colab:app", host="localhost", port=8000, reload=False)
+    uvicorn.run("fixed_colab:app", host="localhost", port=8000, reload=False)

@@ -68,20 +68,10 @@ async function startTracking() {
             } 
         });
         webcamVideo.srcObject = videoStream;
-        
-        // Connect to WebSocket
+          // Connect to WebSocket
         const wsUrl = `ws://localhost:8000/ws`;
         console.log('Attempting WebSocket connection to:', wsUrl);
         webSocket = new WebSocket(wsUrl);
-          webSocket.onopen = () => {
-            console.log('✓ WebSocket connection established');
-            updateConnectionStatus(true);
-            isStreaming = true;
-            startVideoProcessing();
-            startButton.disabled = true;
-            stopButton.disabled = false;
-            generateGraphsBtn.disabled = false;
-        };
         
         webSocket.onmessage = (event) => {
             // Handle ping messages to keep connection alive
@@ -118,10 +108,25 @@ async function startTracking() {
             alert('Connection error. Please check the server and try again.');
             stopTracking();
         };
-        
-        // Generate session ID
+          // Generate session ID
         sessionId = generateUUID();
         console.log('Generated session ID:', sessionId);
+        
+        // Send session ID to server after WebSocket connection established
+        webSocket.onopen = () => {
+            console.log('✓ WebSocket connection established');
+            updateConnectionStatus(true);
+            isStreaming = true;
+            
+            // Send session ID to server immediately
+            webSocket.send(JSON.stringify({ type: 'session_init', session_id: sessionId }));
+            console.log('Sent session ID to server:', sessionId);
+            
+            startVideoProcessing();
+            startButton.disabled = true;
+            stopButton.disabled = false;
+            generateGraphsBtn.disabled = false;
+        };
         
     } catch (err) {
         console.error('Error starting tracking:', err);
@@ -166,24 +171,68 @@ function startVideoProcessing() {
     overlayCanvas.width = 640;
     overlayCanvas.height = 480;
     
-    function processFrame() {
-        if (!isStreaming) return;
-        
-        // Draw video frame to hidden canvas
-        ctx.drawImage(webcamVideo, 0, 0, canvas.width, canvas.height);
-        
-        // Send the frame to the server
-        if (webSocket && webSocket.readyState === WebSocket.OPEN) {
-            const imageData = canvas.toDataURL('image/jpeg', 0.8);
-            webSocket.send(imageData);
-        }
-        
-        // Schedule next frame
-        requestAnimationFrame(processFrame);
+    // Make sure video is playing
+    webcamVideo.play().catch(err => {
+        console.error("Error playing video:", err);
+        alert("Could not play webcam video. Please check your camera permissions.");
+        stopTracking();
+        return;
+    });
+    
+    // Wait for video metadata to load
+    if (webcamVideo.readyState < 2) { // HAVE_CURRENT_DATA or higher
+        console.log("Waiting for video to be ready...");
+        webcamVideo.addEventListener('loadeddata', () => {
+            console.log("Video ready, starting processing");
+            startFrameProcessing();
+        });
+    } else {
+        startFrameProcessing();
     }
     
-    // Start the processing loop
-    processFrame();
+    function startFrameProcessing() {
+        // Frame processing rate control
+        const processingInterval = 100; // Process a frame every 100ms (10fps) to reduce load
+        let lastProcessTime = 0;
+        let processingFrame = false;
+        
+        function processFrame(timestamp) {
+            if (!isStreaming) return;
+            
+            // Control frame rate to prevent overloading
+            if (!processingFrame && (timestamp - lastProcessTime > processingInterval)) {
+                processingFrame = true;
+                lastProcessTime = timestamp;
+                
+                try {
+                    // Draw video frame to hidden canvas
+                    if (webcamVideo.readyState >= 2) { // HAVE_CURRENT_DATA or higher
+                        ctx.drawImage(webcamVideo, 0, 0, canvas.width, canvas.height);
+                        
+                        // Send the frame to the server
+                        if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+                            try {
+                                const imageData = canvas.toDataURL('image/jpeg', 0.7); // Reduced quality for performance
+                                webSocket.send(imageData);
+                            } catch (err) {
+                                console.error("Error sending frame:", err);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error("Error processing frame:", err);
+                } finally {
+                    processingFrame = false;
+                }
+            }
+            
+            // Schedule next frame
+            requestAnimationFrame(processFrame);
+        }
+        
+        // Start the processing loop
+        requestAnimationFrame(processFrame);
+    }
 }
 
 // Update the overlay with processed frame
@@ -239,6 +288,8 @@ async function generateGraphs() {
         // Show loading indicator
         graphsContainer.innerHTML = '<div class="loading">Generating graphs...</div>';
         graphsContainer.style.display = 'block';
+        
+        console.log('Requesting graphs for session ID:', sessionId);
         
         // Request graphs from server
         const response = await fetch('/generate-graphs', {
