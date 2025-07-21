@@ -70,12 +70,11 @@ async function startTracking() {
         webcamVideo.srcObject = videoStream;
         
         // Connect to WebSocket
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+        const wsUrl = `ws://localhost:8000/ws`;
+        console.log('Attempting WebSocket connection to:', wsUrl);
         webSocket = new WebSocket(wsUrl);
-        
-        webSocket.onopen = () => {
-            console.log('WebSocket connection established');
+          webSocket.onopen = () => {
+            console.log('✓ WebSocket connection established');
             updateConnectionStatus(true);
             isStreaming = true;
             startVideoProcessing();
@@ -85,25 +84,44 @@ async function startTracking() {
         };
         
         webSocket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            updateOverlay(data);
-            updateMetrics(data);
+            // Handle ping messages to keep connection alive
+            if (event.data === 'ping') {
+                console.log('Received ping, sending pong');
+                webSocket.send('pong');
+                return;
+            }
+            
+            // Handle data messages
+            try {
+                const data = JSON.parse(event.data);
+                updateOverlay(data);
+                updateMetrics(data);
+            } catch (err) {
+                console.log('Received non-JSON message:', event.data);
+            }
         };
         
-        webSocket.onclose = () => {
-            console.log('WebSocket connection closed');
+        webSocket.onclose = (event) => {
+            console.log('WebSocket connection closed:', event.code, event.reason);
             updateConnectionStatus(false);
             stopTracking();
+            
+            // Automatically reconnect if connection was lost unexpectedly
+            if (event.code === 1006 || event.code === 1011) {
+                console.log('Attempting to reconnect in 3 seconds...');
+                setTimeout(startTracking, 3000);
+            }
         };
         
         webSocket.onerror = (error) => {
             console.error('WebSocket error:', error);
-            alert('Connection error. Please try again.');
+            alert('Connection error. Please check the server and try again.');
             stopTracking();
         };
         
         // Generate session ID
         sessionId = generateUUID();
+        console.log('Generated session ID:', sessionId);
         
     } catch (err) {
         console.error('Error starting tracking:', err);
@@ -241,14 +259,38 @@ async function generateGraphs() {
             alert(`Error: ${data.error}`);
             return;
         }
+          // Update HTML content with graph data
+        const graphHTML = `
+            <h2>Analysis Results</h2>
+            <div class="graph-wrapper">
+                <h3>Action Frequency</h3>
+                <div class="graph-image-container">
+                    <img id="action-frequency-graph" src="data:image/png;base64,${data.actionFrequency}" alt="Action Frequency Graph">
+                </div>
+            </div>
+            <div class="graph-wrapper">
+                <h3>Behavior Timeline</h3>
+                <div class="graph-image-container">
+                    <img id="behavior-timeline-graph" src="data:image/png;base64,${data.behaviorTimeline}" alt="Behavior Timeline Graph">
+                </div>
+            </div>
+            <div class="graph-wrapper">
+                <h3>Movement Intensity</h3>
+                <div class="graph-image-container">
+                    <img id="movement-intensity-graph" src="data:image/png;base64,${data.movementIntensity}" alt="Movement Intensity Graph">
+                </div>
+            </div>
+            
+            <div class="summary-panel">
+                <h3>Analysis Summary</h3>
+                <div id="summary-text"></div>
+                <button id="voice-report">Play Voice Report</button>
+            </div>
+        `;
         
-        // Show the graphs container
+        // Show and update the graphs container
+        graphsContainer.innerHTML = graphHTML;
         graphsContainer.style.display = 'block';
-        
-        // Update graph images
-        document.getElementById('action-frequency-graph').src = `data:image/png;base64,${data.actionFrequency}`;
-        document.getElementById('behavior-timeline-graph').src = `data:image/png;base64,${data.behaviorTimeline}`;
-        document.getElementById('movement-intensity-graph').src = `data:image/png;base64,${data.movementIntensity}`;
         
         // Update summary text
         const summary = data.summary;
@@ -259,7 +301,17 @@ async function generateGraphs() {
             <p>Average movement intensity: <strong>${summary.averageIntensity}</strong></p>
             <p>Peak intensity: <strong>${summary.peakIntensity}</strong> at <strong>${summary.peakTime} seconds</strong></p>
         `;
-        document.getElementById('summary-text').innerHTML = summaryText;
+        
+        const summaryElement = document.getElementById('summary-text');
+        if (summaryElement) {
+            summaryElement.innerHTML = summaryText;
+        }
+        
+        // Re-attach the event listener for the voice report button
+        const voiceReportBtn = document.getElementById('voice-report');
+        if (voiceReportBtn) {
+            voiceReportBtn.addEventListener('click', playVoiceReport);
+        }
         
     } catch (err) {
         console.error('Error generating graphs:', err);

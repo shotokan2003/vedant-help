@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 import pandas as pd
 import joblib
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for better performance
 import matplotlib.pyplot as plt
 from collections import Counter
 import uuid
@@ -16,15 +18,17 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import asyncio
+from ws_ping import ConnectionManager
 
 # Try to import mediapipe, but continue if not available
 try:
     import mediapipe as mp
     MEDIAPIPE_AVAILABLE = True
-    print("MediaPipe successfully imported")
+    print("✓ MediaPipe successfully imported")
 except ImportError:
     MEDIAPIPE_AVAILABLE = False
-    print("WARNING: MediaPipe not available. Some features will be limited.")
+    print("⚠ WARNING: MediaPipe not available. Some features will be limited.")
     # Create placeholder for mp
     class PlaceholderMP:
         class solutions:
@@ -51,6 +55,7 @@ except ImportError:
         mp = PlaceholderMP()
 
 # Initialize FastAPI app
+print("Initializing FastAPI application...")
 app = FastAPI(title="Body Tracking AI", description="AI model for body tracking and behavior analysis")
 
 # Add CORS middleware
@@ -61,15 +66,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+print("✓ FastAPI app initialized")
 
 # === Loading ML Model ===
 try:
+    print("Loading ML model...")
     model = joblib.load("Body_Tracking.pkl")
     MODEL_AVAILABLE = True
-    print("ML model loaded successfully")
+    print("✓ ML model loaded successfully")
 except Exception as e:
     MODEL_AVAILABLE = False
-    print(f"WARNING: Could not load model: {e}")
+    print(f"⚠ WARNING: Could not load model: {e}")
     model = None
 
 # === Setting up features===
@@ -111,14 +118,26 @@ class SessionData:
         self.previous_landmarks = None
         self.smoothing_window = 5
         self.frame_count = 0
-        self.FRAME_RATE = 20.02  # Approximate frame rate
+        self.FRAME_RATE = 90  # Approximate frame rate
 
 # Store session data per connection
 sessions = {}
 
+# WebSocket connection manager for handling ping/pong
+connection_manager = ConnectionManager()
+
 # === Serve static files ===
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# === Startup Event ===
+@app.on_event("startup")
+async def startup_event():
+    print("🚀 Body Tracking AI Server is ready!")
+    print(f"📊 Model Available: {'✓' if MODEL_AVAILABLE else '✗'}")
+    print(f"🎥 MediaPipe Available: {'✓' if MEDIAPIPE_AVAILABLE else '✗'}")
+    print("📁 Static files mounted")
+    print("🌐 Server is now accepting connections")
 
 # === HTML Response ===
 @app.get("/", response_class=HTMLResponse)
@@ -126,29 +145,70 @@ async def get():
     with open('static/index.html', 'r') as f:
         return f.read()
 
+# === Test WebSocket ===
+@app.get("/test", response_class=HTMLResponse)
+async def get_test():
+    with open('static/websocket_test.html', 'r') as f:
+        return f.read()
+
+# === Health Check ===
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "mediapipe": MEDIAPIPE_AVAILABLE,
+        "model": MODEL_AVAILABLE,
+        "active_sessions": len(sessions)
+    }
+
+# === WebSocket Status Check ===
+@app.get("/ws-status")
+async def websocket_status():
+    return {
+        "message": "WebSocket endpoint is available at /ws",
+        "active_connections": len(sessions),
+        "instructions": "Use WebSocket protocol to connect to ws://localhost:8000/ws"
+    }
+
 # === WebSocket Connection ===
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
+    client_host = websocket.client.host if websocket.client else "unknown"
+    print(f"WebSocket connection attempt from: {client_host}")
+    
     session_id = str(uuid.uuid4())
+    
+    # Use connection manager to handle WebSocket lifecycle
+    await connection_manager.connect(websocket, session_id)
+    print("✓ WebSocket connection accepted successfully")
+    
     sessions[session_id] = SessionData()
+    print(f"✓ Created session: {session_id}")
     
     # Initialize holistic if mediapipe is available
     holistic = None
     if MEDIAPIPE_AVAILABLE:
         holistic = mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+        print("✓ MediaPipe holistic model initialized")
     
     try:
-        while True:
+        while True:            
             data = await websocket.receive_text()
             
+            if not data:
+                continue
+                
             # Process the frame
-            img_data = data.split(",")[1]
-            img_bytes = base64.b64decode(img_data)
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            
-            if frame is None:
+            try:
+                img_data = data.split(",")[1]
+                img_bytes = base64.b64decode(img_data)
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                
+                if frame is None:
+                    continue
+            except Exception as e:
+                print(f"Frame processing error: {e}")
                 continue
             
             session = sessions[session_id]
@@ -278,16 +338,21 @@ async def websocket_endpoint(websocket: WebSocket):
             }
             
             await websocket.send_json(analysis_data)
-            
     except WebSocketDisconnect:
         print(f"Client disconnected: {session_id}")
+    except asyncio.CancelledError:
+        print(f"WebSocket connection cancelled for {session_id}")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error in WebSocket connection: {e}")
     finally:
+        # Clean up resources
         if session_id in sessions:
             del sessions[session_id]
         if MEDIAPIPE_AVAILABLE and holistic:
             holistic.close()
+        # Remove from connection manager
+        connection_manager.disconnect(session_id)
+        print(f"Session {session_id} cleaned up")
 
 # === API Endpoints for Data Analysis ===
 @app.post("/generate-graphs")
@@ -422,4 +487,7 @@ async def generate_graphs(session_id: dict):
 
 # === Run the FastAPI app ===
 if __name__ == "__main__":
-    uvicorn.run("colab:app", host="localhost", port=8000, reload=True)
+    print("Starting FastAPI server...")
+    print("Server will be available at: http://localhost:8000")
+    print("Press Ctrl+C to stop the server")
+    uvicorn.run("colab:app", host="localhost", port=8000, reload=False)
