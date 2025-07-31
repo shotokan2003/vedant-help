@@ -16,7 +16,7 @@ if __name__ == "__main__":
     
     try:
         uvicorn.run(
-            "colab:app", 
+            "fixed_colab", 
             host="localhost", 
             port=8000, 
             reload=True,
