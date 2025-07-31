@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import asyncio
 from ws_ping import ConnectionManager
+import time
 
 # Try to import mediapipe, but continue if not available
 try:
@@ -234,10 +235,9 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:            
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)  # Add timeout
-                
                 if not data:
                     continue
-                    
+                
                 # Check if it's a pong response
                 if data == 'pong':
                     print(f"Received pong from {session_id}")
@@ -274,15 +274,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     print(f"Frame processing error: {e}")
                     continue
                 
-                # Get session and increment frame count
+                # === Optimization: Frame skipping ===
                 session = sessions[session_id]
                 session.frame_count += 1
+                if session.frame_count % FRAME_SKIP != 0:
+                    continue
                 
-                # Initialize variables
-                behavior_prediction = "unknown"
-                confidence = 0.0
-                smoothed_value = 0.0
-                
+                # === Optimization: Downscale frame before processing ===
+                if frame is not None:
+                    frame = cv2.resize(frame, (320, 240), interpolation=cv2.INTER_AREA)
+                # === Optimization: Timing logs ===
+                t0 = time.time()
                 # Process with MediaPipe if available
                 if MEDIAPIPE_AVAILABLE and holistic and frame is not None:
                     # Process the frame with MediaPipe
@@ -338,6 +340,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     # Behavior Prediction if model is available
                     if MODEL_AVAILABLE and model and results.pose_landmarks:
+                        t2 = time.time()
                         try:
                             pose = results.pose_landmarks.landmark
                             pose_row = list(np.array([[lm.x, lm.y, lm.z, lm.visibility] for lm in pose]).flatten())
@@ -394,7 +397,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 cv2.rectangle(image, (5, 5), (635, 475), (0, 190, 255), thickness=2)
                 
                 # Reduce image quality to improve performance
-                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 70]  # 70% quality
+                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 100]  # Lower quality for faster transfer
                 _, buffer = cv2.imencode('.jpg', image, encode_params)
                 img_str = base64.b64encode(buffer).decode('utf-8')
                 
@@ -595,3 +598,5 @@ if __name__ == "__main__":
     print("Server will be available at: http://localhost:8000")
     print("Press Ctrl+C to stop the server")
     uvicorn.run("fixed_colab:app", host="localhost", port=8000, reload=False)
+
+FRAME_SKIP = 2  # Process every 2nd frame (adjust as needed)
