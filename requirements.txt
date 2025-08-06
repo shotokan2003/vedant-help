@@ -9,3 +9,4 @@ matplotlib>=3.5.0
 scikit-learn>=1.0.0
 mediapipe>=0.10.5
 python-multipart>=0.0.6
+gunicorn>=20.0.0

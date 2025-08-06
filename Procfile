@@ -1,1 +1,1 @@
-web: uvicorn fixed_colab:app --host 0.0.0.0 --port 8000 --log-level info
+web: uvicorn fixed_colab:app --host 0.0.0.0 --port $PORT --log-level info

@@ -595,8 +595,10 @@ async def generate_graphs(session_id: dict):
 # === Run the FastAPI app ===
 if __name__ == "__main__":
     print("Starting FastAPI server...")
-    print("Server will be available at: http://localhost:8000")
-    print("Press Ctrl+C to stop the server")
-    uvicorn.run("fixed_colab:app", host="localhost", port=8000, reload=False)
+    # Use environment variables for host and port (for Railway deployment)
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", 8000))
+    print(f"Server will be available at: http://{host}:{port}")
+    uvicorn.run("fixed_colab:app", host=host, port=port, reload=False)
 
 FRAME_SKIP = 2  # Process every 2nd frame (adjust as needed)
