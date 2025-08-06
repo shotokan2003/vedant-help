@@ -33,8 +33,8 @@ playsound
 ## Installation
 1. Clone this repository:
    ```
-   git clone https://github.com/shotokan2003/vedant-help.git
-   cd vedant-help
+   git clone https://github.com/shotokan2003/vedant.git
+   cd vedant
    ```
 2. Create and activate a new conda environment:
    ```
