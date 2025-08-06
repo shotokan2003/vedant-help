@@ -50,7 +50,7 @@ playsound
 1. Make sure the `Body_Tracking.pkl` model file is in the same directory as the code
 2. Run the FastAPI application:
    ```
-   python fixed_collab.py
+   python fixed_colab.py
    ```
 3. Open your web browser and navigate to http://localhost:8000
 4. Click "Start Tracking" to begin the body tracking process
